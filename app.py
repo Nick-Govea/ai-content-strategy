@@ -1,13 +1,10 @@
 import streamlit as st
-import os
-from dotenv import load_dotenv
 
 # Import our backend modules
 from utils.reddit_collector import RedditCollector
 from utils.ai_analyzer import AIAnalyzer
 from utils.data_processor import DataProcessor
-
-load_dotenv()
+from utils.config import validate_config, is_streamlit_cloud
 
 # Initialize backend services
 @st.cache_resource
@@ -27,11 +24,19 @@ def main():
     st.title("AI Content Strategy Assistant")
     st.markdown("Analyze Reddit trends and generate content strategies with AI")
     
+    # Show environment info
+    if is_streamlit_cloud():
+        st.sidebar.success("🌐 Running on Streamlit Cloud")
+    else:
+        st.sidebar.info("💻 Running locally")
+    
     # Initialize services
     reddit_collector, ai_analyzer, data_processor = init_services()
     
     if not all([reddit_collector, ai_analyzer, data_processor]):
         st.error("Failed to initialize services. Please check your API keys.")
+        if not validate_config():
+            st.error("Configuration validation failed. Check your .env file or Streamlit secrets.")
         return
     
     # Sidebar for configuration

@@ -1,16 +1,17 @@
 import praw
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
+from utils.config import REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USER_AGENT, validate_config
 
 class RedditCollector:
     def __init__(self):
         """Initialize Reddit API connection"""
+        # Validate configuration
+        if not validate_config():
+            raise ValueError("Missing required Reddit API configuration")
+        
         self.reddit = praw.Reddit(
-            client_id=os.getenv("REDDIT_CLIENT_ID"),
-            client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
-            user_agent=os.getenv("REDDIT_USER_AGENT")
+            client_id=REDDIT_CLIENT_ID,
+            client_secret=REDDIT_CLIENT_SECRET,
+            user_agent=REDDIT_USER_AGENT
         )
     
     def get_hot_posts(self, subreddit_name, limit=10):

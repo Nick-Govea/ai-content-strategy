@@ -1,17 +1,17 @@
 import google.generativeai as genai
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
+from utils.config import GEMINI_API_KEY, validate_config
 
 class AIAnalyzer:
     def __init__(self):
         """Initialize Gemini API connection"""
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY not found in environment variables")
+        # Validate configuration
+        if not validate_config():
+            raise ValueError("Missing required Gemini API configuration")
         
-        genai.configure(api_key=api_key)
+        if not GEMINI_API_KEY:
+            raise ValueError("GEMINI_API_KEY not found in environment variables or secrets")
+        
+        genai.configure(api_key=GEMINI_API_KEY)
         self.model = genai.GenerativeModel('gemini-2.0-flash')
     
     def analyze_reddit_trends(self, reddit_data, analysis_type="trends"):
