@@ -1,38 +1,120 @@
 import streamlit as st
 import os
-import google.generativeai as genai
 from dotenv import load_dotenv
-import requests
 
-load_dotenv()  # Load the .env file
-api_key = os.getenv("GEMINI_API_KEY")  # Read variable from .env
+# Import our backend modules
+from utils.reddit_collector import RedditCollector
+from utils.ai_analyzer import AIAnalyzer
+from utils.data_processor import DataProcessor
 
-if not api_key:
-    st.error("GEMINI_API_KEY not found in environment variables")
-    st.stop()
+load_dotenv()
 
-genai.configure(api_key=api_key)  # Configure Gemini with the key
+# Initialize backend services
+@st.cache_resource
+def init_services():
+    """Initialize backend services (cached to avoid re-initialization)"""
+    try:
+        reddit_collector = RedditCollector()
+        ai_analyzer = AIAnalyzer()
+        data_processor = DataProcessor()
+        return reddit_collector, ai_analyzer, data_processor
+    except Exception as e:
+        st.error(f"Error initializing services: {e}")
+        return None, None, None
 
-# Create the model
-model = genai.GenerativeModel('gemini-2.0-flash')
+# Main app
+def main():
+    st.title("AI Content Strategy Assistant")
+    st.markdown("Analyze Reddit trends and generate content strategies with AI")
+    
+    # Initialize services
+    reddit_collector, ai_analyzer, data_processor = init_services()
+    
+    if not all([reddit_collector, ai_analyzer, data_processor]):
+        st.error("Failed to initialize services. Please check your API keys.")
+        return
+    
+    # Sidebar for configuration
+    st.sidebar.header("Configuration")
+    
+    # Subreddit selection
+    subreddits_input = st.sidebar.text_area(
+        "Enter subreddits (one per line):",
+        value="python\nprogramming\nwebdev",
+        help="Enter subreddit names without the 'r/' prefix"
+    )
+    
+    subreddits = [sub.strip() for sub in subreddits_input.split('\n') if sub.strip()]
+    
+    # Analysis type
+    analysis_type = st.sidebar.selectbox(
+        "Analysis Type:",
+        ["trends", "sentiment", "content_ideas"]
+    )
+    
+    # Number of posts to fetch
+    post_limit = st.sidebar.slider("Posts per subreddit:", 1, 20, 5)
+    
+    # Main content area
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.header("📊 Data Collection")
+        
+        if st.button("Fetch Reddit Data"):
+            with st.spinner("Fetching Reddit data..."):
+                try:
+                    # Fetch data from Reddit
+                    reddit_data = reddit_collector.get_trending_posts(subreddits, post_limit)
+                    
+                    # Clean and process data
+                    cleaned_data = data_processor.clean_reddit_data(reddit_data)
+                    filtered_data = data_processor.filter_top_posts(cleaned_data)
+                    
+                    # Save to session state
+                    st.session_state.reddit_data = filtered_data
+                    st.session_state.formatted_data = data_processor.format_for_display(filtered_data)
+                    
+                    st.success(f"✅ Fetched {sum(len(posts) for posts in filtered_data.values())} posts from {len(filtered_data)} subreddits")
+                    
+                except Exception as e:
+                    st.error(f"Error fetching data: {e}")
+    
+    with col2:
+        st.header("🤖 AI Analysis")
+        
+        if 'reddit_data' in st.session_state and st.session_state.reddit_data:
+            if st.button("Generate AI Analysis"):
+                with st.spinner("Analyzing with AI..."):
+                    try:
+                        if analysis_type == "content_ideas":
+                            analysis = ai_analyzer.generate_content_ideas(st.session_state.reddit_data)
+                        else:
+                            analysis = ai_analyzer.analyze_reddit_trends(st.session_state.reddit_data, analysis_type)
+                        
+                        st.session_state.analysis = analysis
+                        st.success("✅ Analysis complete!")
+                        
+                    except Exception as e:
+                        st.error(f"Error generating analysis: {e}")
+    
+    # Display results
+    if 'formatted_data' in st.session_state and st.session_state.formatted_data:
+        st.header("📈 Reddit Data")
+        
+        for subreddit, posts in st.session_state.formatted_data.items():
+            with st.expander(f"r/{subreddit} ({len(posts)} posts)"):
+                for post in posts:
+                    st.markdown(f"**{post['title']}**")
+                    st.markdown(f"Score: {post['score']} | Comments: {post['num_comments']} | Engagement: {post['engagement_rate']}")
+                    if post['content']:
+                        st.markdown(f"*{post['content'][:100]}...*")
+                    st.markdown(f"[View Post]({post['url']})")
+                    st.divider()
+    
+    if 'analysis' in st.session_state:
+        st.header("🧠 AI Analysis Results")
+        st.markdown(st.session_state.analysis)
 
-# Title of Page
-
-st.title("Your all-in-one solution for market trend data")
-
-#Reddit API
-
-
-
-
-#Prompting
-instructions = "Business Context: You are a consultant who works in the data analysis industry. I will provide you with data from reddit and your goal is to act like you scraped all this data and come up with solutions to the questions that i give you. you are to speak in a professional tone. keep your responses short but don't sacrifice clarity. Your job are to find market trends"
-
-user_input = instructions + st.text_area("Ask me something")
-submit = st.button("Send")
-
-if user_input and submit:
-    with st.spinner("Thinking..."):
-        response = model.generate_content(user_input)
-        st.success("✅ Done!")
-        st.markdown("**Gemini:** " + response.text)
+if __name__ == "__main__":
+    main()
