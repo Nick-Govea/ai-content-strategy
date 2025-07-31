@@ -16,8 +16,14 @@ genai.configure(api_key=api_key)  # Configure Gemini with the key
 model = genai.GenerativeModel('gemini-2.0-flash')
 
 # Test the API
-try:
-    response = model.generate_content("Explain how AI works in a few words")
-    st.write("Response:", response.text)
-except Exception as e:
-    st.error(f"Error calling Gemini API: {e}")
+
+st.title("Your all-in-one solution for market trend data")
+
+user_input = st.text_area("Ask me something")
+submit = st.button("Send")
+
+if user_input and submit:
+    with st.spinner("Thinking..."):
+        response = model.generate_content(user_input)
+        st.success("✅ Done!")
+        st.markdown("**Gemini:** " + response.text)
