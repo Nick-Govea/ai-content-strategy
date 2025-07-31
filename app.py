@@ -19,7 +19,13 @@ model = genai.GenerativeModel('gemini-2.0-flash')
 
 st.title("Your all-in-one solution for market trend data")
 
-user_input = st.text_area("Ask me something")
+
+
+
+#Prompting
+instructions = "Business Context: You are a consultant who works in the data analysis industry. I will provide you with data from reddit and your goal is to act like you scraped all this data and come up with solutions to the questions that i give you. you are to speak in a professional tone. keep your responses short but don't sacrifice clarity. Your job are to find market trends"
+
+user_input = instructions + st.text_area("Ask me something")
 submit = st.button("Send")
 
 if user_input and submit:
