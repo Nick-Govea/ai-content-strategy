@@ -2,6 +2,7 @@ import streamlit as st
 import os
 import google.generativeai as genai
 from dotenv import load_dotenv
+import requests
 
 load_dotenv()  # Load the .env file
 api_key = os.getenv("GEMINI_API_KEY")  # Read variable from .env
@@ -15,9 +16,11 @@ genai.configure(api_key=api_key)  # Configure Gemini with the key
 # Create the model
 model = genai.GenerativeModel('gemini-2.0-flash')
 
-# Test the API
+# Title of Page
 
 st.title("Your all-in-one solution for market trend data")
+
+#Reddit API
 
 
 
