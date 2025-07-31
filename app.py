@@ -1,54 +1,131 @@
 import streamlit as st
+import praw
+import google.generativeai as genai
+import os
+from datetime import datetime
+from dotenv import load_dotenv
 
-# Import our backend modules
-from utils.reddit_collector import RedditCollector
-from utils.ai_analyzer import AIAnalyzer
-from utils.data_processor import DataProcessor
-from utils.config import validate_config, is_streamlit_cloud
+# Load environment variables from .env file
+load_dotenv()
 
-# Initialize backend services
-@st.cache_resource
-def init_services():
-    """Initialize backend services (cached to avoid re-initialization)"""
+# Simple config function that works both locally and on Streamlit Cloud
+def get_api_key(key_name):
+    """Get API key from Streamlit secrets or environment variables"""
     try:
-        reddit_collector = RedditCollector()
-        ai_analyzer = AIAnalyzer()
-        data_processor = DataProcessor()
-        return reddit_collector, ai_analyzer, data_processor
+        # Try Streamlit secrets first (for cloud deployment)
+        return st.secrets[key_name]
+    except:
+        # Fall back to environment variables (for local development)
+        return os.getenv(key_name)
+
+# Initialize APIs
+def init_apis():
+    """Initialize Reddit and Gemini APIs"""
+    # Get API keys
+    gemini_key = get_api_key("GEMINI_API_KEY")
+    reddit_id = get_api_key("REDDIT_CLIENT_ID")
+    reddit_secret = get_api_key("REDDIT_CLIENT_SECRET")
+    reddit_agent = get_api_key("REDDIT_USER_AGENT")
+    
+    # Check if all keys are available
+    if not all([gemini_key, reddit_id, reddit_secret, reddit_agent]):
+        st.error("❌ Missing API keys. Please check your configuration.")
+        st.info("For local development: Add keys to .env file")
+        st.info("For Streamlit Cloud: Add keys to Streamlit secrets")
+        return None, None
+    
+    try:
+        # Initialize Reddit
+        reddit = praw.Reddit(
+            client_id=reddit_id,
+            client_secret=reddit_secret,
+            user_agent=reddit_agent
+        )
+        
+        # Initialize Gemini
+        genai.configure(api_key=gemini_key)
+        model = genai.GenerativeModel('gemini-2.0-flash')
+        
+        return reddit, model
     except Exception as e:
-        st.error(f"Error initializing services: {e}")
-        return None, None, None
+        st.error(f"❌ Error initializing APIs: {e}")
+        return None, None
+
+# Fetch Reddit posts
+def fetch_reddit_posts(reddit, subreddits, limit=5):
+    """Fetch posts from multiple subreddits"""
+    all_posts = {}
+    
+    for subreddit_name in subreddits:
+        try:
+            subreddit = reddit.subreddit(subreddit_name)
+            posts = []
+            
+            for post in subreddit.hot(limit=limit):
+                posts.append({
+                    'title': post.title,
+                    'content': post.selftext[:200] + "..." if len(post.selftext) > 200 else post.selftext,
+                    'score': post.score,
+                    'comments': post.num_comments,
+                    'url': post.url,
+                    'author': str(post.author)
+                })
+            
+            all_posts[subreddit_name] = posts
+            
+        except Exception as e:
+            st.warning(f"⚠️ Error fetching from r/{subreddit_name}: {e}")
+    
+    return all_posts
+
+# Analyze with AI
+def analyze_with_ai(model, reddit_data, analysis_type):
+    """Analyze Reddit data with Gemini AI"""
+    try:
+        # Format data for AI
+        data_text = ""
+        for subreddit, posts in reddit_data.items():
+            data_text += f"\n--- r/{subreddit} ---\n"
+            for post in posts:
+                data_text += f"Title: {post['title']}\n"
+                data_text += f"Content: {post['content']}\n"
+                data_text += f"Score: {post['score']}, Comments: {post['comments']}\n\n"
+        
+        # Create prompt based on analysis type
+        if analysis_type == "trends":
+            prompt = f"Analyze these Reddit posts and identify key trends:\n\n{data_text}\n\nProvide:\n1. Top 3 trending topics\n2. Common themes\n3. Content strategy recommendations"
+        elif analysis_type == "sentiment":
+            prompt = f"Analyze the sentiment of these Reddit posts:\n\n{data_text}\n\nProvide:\n1. Overall sentiment\n2. Key emotional themes\n3. Community mood insights"
+        else:  # content_ideas
+            prompt = f"Based on these Reddit posts, generate 5 content ideas:\n\n{data_text}\n\nFor each idea, provide:\n- Title\n- Key points\n- Target audience"
+        
+        # Generate response
+        response = model.generate_content(prompt)
+        return response.text
+        
+    except Exception as e:
+        return f"❌ Error analyzing data: {e}"
 
 # Main app
 def main():
-    st.title("AI Content Strategy Assistant")
+    st.title("🤖 AI Content Strategy Assistant")
     st.markdown("Analyze Reddit trends and generate content strategies with AI")
     
-    # Show environment info
-    if is_streamlit_cloud():
-        st.sidebar.success("🌐 Running on Streamlit Cloud")
-    else:
-        st.sidebar.info("💻 Running locally")
+    # Initialize APIs
+    reddit, model = init_apis()
     
-    # Initialize services
-    reddit_collector, ai_analyzer, data_processor = init_services()
+    if not reddit or not model:
+        st.stop()
     
-    if not all([reddit_collector, ai_analyzer, data_processor]):
-        st.error("Failed to initialize services. Please check your API keys.")
-        if not validate_config():
-            st.error("Configuration validation failed. Check your .env file or Streamlit secrets.")
-        return
+    # Sidebar configuration
+    st.sidebar.header("⚙️ Configuration")
     
-    # Sidebar for configuration
-    st.sidebar.header("Configuration")
-    
-    # Subreddit selection
+    # Subreddit input
     subreddits_input = st.sidebar.text_area(
         "Enter subreddits (one per line):",
         value="python\nprogramming\nwebdev",
         help="Enter subreddit names without the 'r/' prefix"
     )
-    
     subreddits = [sub.strip() for sub in subreddits_input.split('\n') if sub.strip()]
     
     # Analysis type
@@ -57,63 +134,47 @@ def main():
         ["trends", "sentiment", "content_ideas"]
     )
     
-    # Number of posts to fetch
-    post_limit = st.sidebar.slider("Posts per subreddit:", 1, 20, 5)
+    # Post limit
+    post_limit = st.sidebar.slider("Posts per subreddit:", 1, 10, 5)
     
-    # Main content area
+    # Main content
     col1, col2 = st.columns([1, 1])
     
     with col1:
         st.header("📊 Data Collection")
         
-        if st.button("Fetch Reddit Data"):
+        if st.button("🔍 Fetch Reddit Data"):
             with st.spinner("Fetching Reddit data..."):
-                try:
-                    # Fetch data from Reddit
-                    reddit_data = reddit_collector.get_trending_posts(subreddits, post_limit)
-                    
-                    # Clean and process data
-                    cleaned_data = data_processor.clean_reddit_data(reddit_data)
-                    filtered_data = data_processor.filter_top_posts(cleaned_data)
-                    
-                    # Save to session state
-                    st.session_state.reddit_data = filtered_data
-                    st.session_state.formatted_data = data_processor.format_for_display(filtered_data)
-                    
-                    st.success(f"✅ Fetched {sum(len(posts) for posts in filtered_data.values())} posts from {len(filtered_data)} subreddits")
-                    
-                except Exception as e:
-                    st.error(f"Error fetching data: {e}")
+                reddit_data = fetch_reddit_posts(reddit, subreddits, post_limit)
+                
+                if reddit_data:
+                    st.session_state.reddit_data = reddit_data
+                    total_posts = sum(len(posts) for posts in reddit_data.values())
+                    st.success(f"✅ Fetched {total_posts} posts from {len(reddit_data)} subreddits")
+                else:
+                    st.error("❌ No data fetched")
     
     with col2:
-        st.header("🤖 AI Analysis")
+        st.header("🧠 AI Analysis")
         
         if 'reddit_data' in st.session_state and st.session_state.reddit_data:
-            if st.button("Generate AI Analysis"):
+            if st.button("🤖 Generate Analysis"):
                 with st.spinner("Analyzing with AI..."):
-                    try:
-                        if analysis_type == "content_ideas":
-                            analysis = ai_analyzer.generate_content_ideas(st.session_state.reddit_data)
-                        else:
-                            analysis = ai_analyzer.analyze_reddit_trends(st.session_state.reddit_data, analysis_type)
-                        
-                        st.session_state.analysis = analysis
-                        st.success("✅ Analysis complete!")
-                        
-                    except Exception as e:
-                        st.error(f"Error generating analysis: {e}")
+                    analysis = analyze_with_ai(model, st.session_state.reddit_data, analysis_type)
+                    st.session_state.analysis = analysis
+                    st.success("✅ Analysis complete!")
     
     # Display results
-    if 'formatted_data' in st.session_state and st.session_state.formatted_data:
+    if 'reddit_data' in st.session_state and st.session_state.reddit_data:
         st.header("📈 Reddit Data")
         
-        for subreddit, posts in st.session_state.formatted_data.items():
+        for subreddit, posts in st.session_state.reddit_data.items():
             with st.expander(f"r/{subreddit} ({len(posts)} posts)"):
                 for post in posts:
                     st.markdown(f"**{post['title']}**")
-                    st.markdown(f"Score: {post['score']} | Comments: {post['num_comments']} | Engagement: {post['engagement_rate']}")
+                    st.markdown(f"Score: {post['score']} | Comments: {post['comments']}")
                     if post['content']:
-                        st.markdown(f"*{post['content'][:100]}...*")
+                        st.markdown(f"*{post['content']}*")
                     st.markdown(f"[View Post]({post['url']})")
                     st.divider()
     
